@@ -1,74 +1,97 @@
 import { Server, Socket } from "socket.io";
 import { rooms } from "./app";
 import { Chess } from "chess.js";
-import { constrainedMemory } from "process";
+
+// Declare a global object to hold game instances for each room
+const games: Record<string, Chess> = {};
 
 export const handleSocketConnections = (io: Server) => {
   io.on("connection", (socket: Socket) => {
     console.log("a user connected");
-    var chess: any = new Chess();
+
     socket.on("disconnect", () => {
       console.log("user disconnected");
+      handleDisconnect(socket);
     });
 
     socket.on("join room", (room: string) => {
+      if (!games[room]) {
+        games[room] = new Chess(); // Initialize a new game if it doesn't exist for the room
+      }
+
       if (Object.keys(rooms[room].users).length < 2) {
         socket.join(room);
         rooms[room].users[socket.id] = "";
-        console.log(rooms);
-        console.log(`User joined room: ${room}`);
-      } else {
-        console.log(`Room ${room} is full. User cannot join.`);
 
-        socket.emit("room full", room); // Notify the user that the room is full
-      }
-      if (Object.keys(rooms[room].users).length == 2) {
-        const userIds = Object.keys(rooms[room].users);
-        rooms[room].users[userIds[0]] = "white";
-        rooms[room].users[userIds[1]] = "black";
-        chess = new Chess();
+        if (Object.keys(rooms[room].users).length === 2) {
+          const userIds = Object.keys(rooms[room].users);
+          rooms[room].users[userIds[0]] = "white";
+          rooms[room].users[userIds[1]] = "black";
+         
+          io.to(room).emit("message", { type: "gameStart", chessfen: games[room].fen() });
+        }
+      } else {
+        socket.emit("room full", room);
       }
     });
 
-    socket.on("message", (data:any) => {
+    socket.on("message", (data: any) => {
       const { room, type } = data;
 
       if (rooms[room]) {
-        if (type == "move") {
+        if (type === "move") {
           try {
-            const move = chess.move({ from: data.move.from, to: data.move.to });
-            console.log(move);
-            rooms[room].gameboard.push(data.move);
-            console.log(`Move received for room ${room}:`, data.move);
-            console.log(rooms[room]);
-            socket.to(room).emit("message", {
-              type: "move",
-              from: data.move.from,
-              to: data.move.to,
-            });
-            console.log(chess.ascii());
+            const move = games[room].move({ from: data.move.from, to: data.move.to });
+            if(games[room].isGameOver()){
 
-            io.to(room).emit("message",{type:"move",move:{
+              console.log("Game Over");
+              console.log(games[room].turn)
+              io.to(room).emit("message",{type:"gameOver",winner:games[room].turn()})
+            }
               
-              from: data.move.from, to: data.move.to 
-            } 
-          } );// this is not woking
+            else if(move) {  
+              rooms[room].gameboard.push(move);
+              console.log(games[room].ascii())
+              io.to(room).emit("message", {
+                type: "move",
+                from: move.from,
+                to: move.to,
+                chessfen: games[room].fen()
+              });
+            } else {
+              io.to(room).emit("error", { message: "Invalid move" });
+            }
           } catch (e) {
-            console.log("error Move")
-            socket.emit("error", { message: "Invalid move" });
+            console.error("Error during move:", e);
+            socket.emit("error", { message: "Server error during move" });
           }
         }
-      } else {
-        console.log(`Room ${room} not found for move`);
       }
     });
 
     socket.on("leave room", (room: string) => {
-      socket.leave(room);
-      if (rooms[room] && rooms[room].users[socket.id]) {
-        delete rooms[room].users[socket.id];
-      }
-      console.log(`User left room: ${room}`);
+      handleLeaveRoom(socket, room);
     });
   });
+
+  function handleDisconnect(socket: Socket) {
+    Object.keys(rooms).forEach((room) => {
+      if (rooms[room].users[socket.id]) {
+        handleLeaveRoom(socket, room);
+      }
+    });
+  }
+
+  function handleLeaveRoom(socket: Socket, room: string) {
+    socket.leave(room);
+    if (rooms[room] && rooms[room].users[socket.id]) {
+      delete rooms[room].users[socket.id];
+      console.log(`User left room: ${room}`);
+      if (Object.keys(rooms[room].users).length === 0) {
+        delete rooms[room];
+        delete games[room]; // Cleanup the game instance when the room is empty
+        console.log(`Room ${room} deleted`);
+      }
+    }
+  }
 };
