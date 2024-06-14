@@ -27,6 +27,9 @@ export const handleSocketConnections = (io: Server) => {
           const userIds = Object.keys(rooms[room].users);
           rooms[room].users[userIds[0]] = "white";
           rooms[room].users[userIds[1]] = "black";
+
+          io.to(userIds[0]).emit("color", "white");
+          io.to(userIds[1]).emit("color", "black");
          
           io.to(room).emit("message", { type: "gameStart", chessfen: games[room].fen() });
         }
@@ -46,7 +49,7 @@ export const handleSocketConnections = (io: Server) => {
 
               console.log("Game Over");
               console.log(games[room].turn)
-              io.to(room).emit("message",{type:"gameOver",winner:games[room].turn()})
+              io.to(room).emit("message",{type:"gameOver",chessfen: games[room].fen(),winner:games[room].turn()})
             }
               
             else if(move) {  

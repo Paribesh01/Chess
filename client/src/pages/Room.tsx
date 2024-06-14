@@ -10,13 +10,13 @@ interface Message {
 }
 
 export function Room() {
+  const [color, setColor] = useState<any>();
   const [gamefen, setGamefen] = useState<string>(
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
   );
-  const [innertext, setinnertext] = useState<string>("");
-  const [from, setFrom] = useState<string>("");
-  const [to, setTo] = useState<string>("");
+  const [innertext, setInnertext] = useState<string>("");
   const { roomId } = useParams<{ roomId: string }>();
+  const [gameover, setGameover] = useState<boolean>(false);
 
   useEffect(() => {
     socket.emit("join room", roomId);
@@ -25,13 +25,18 @@ export function Room() {
       if (data.type === "move" && data.chessfen) {
         setGamefen(data.chessfen);
       }
-      if (data.type == "gameOver") {
-        setGamefen("");
-        setinnertext(
+      if (data.type === "gameOver" && data.chessfen) {
+        setGamefen(data.chessfen);
+        setGameover(true);
+        setInnertext(
           `Game over and ${data.winner === "w" ? "Black" : "White"} wins`
         );
         console.log("Game Over");
       }
+    });
+
+    socket.on("color", (value: string) => {
+      setColor(value);
     });
 
     socket.on("error", (error: any) => {
@@ -45,7 +50,23 @@ export function Room() {
     };
   }, [roomId]);
 
+  useEffect(() => {
+    // Check whose turn it is and update innertext accordingly
+    const currentTurn = gamefen.split(" ")[1];
+    if (gameover) return;
+    if (
+      (currentTurn === "w" && color === "white") ||
+      (currentTurn === "b" && color === "black")
+    ) {
+      setInnertext("It's your turn!");
+    } else {
+      setInnertext("It's your opponent's turn.");
+    }
+  }, [gamefen, color]);
+
   const makeAMove = (from: string, to: string) => {
+    if (gameover) return;
+
     console.log("move Sent");
 
     socket.emit("message", {
@@ -55,47 +76,35 @@ export function Room() {
     });
   };
 
-  const handleMoveSubmit = () => {
-    makeAMove(from, to);
-    setFrom(""); // Clear the input fields after move
-    setTo("");
-  };
-
   function onDrop(sourceSquare: string, targetSquare: string) {
-    makeAMove(sourceSquare, targetSquare);
-    // Since the move validation is done on the server,
-    // we do not need to return a value here
-    return true;
+    // Extract the turn from the FEN string (last space-separated value)
+    const currentTurn = gamefen.split(" ")[1];
+
+    if (
+      (currentTurn === "w" && color === "white") ||
+      (currentTurn === "b" && color === "black")
+    ) {
+      makeAMove(sourceSquare, targetSquare);
+
+      return true;
+    } else {
+      console.log(`It's not your turn.`);
+      return false;
+    }
   }
 
   return (
     <div>
       <h1>Room: {roomId}</h1>
+      <h1>You are playing as {color}</h1>
       <h1>{innertext}</h1>
-
-      <div>
-        <input
-          type="text"
-          id="from"
-          value={from}
-          onChange={(e) => setFrom(e.target.value)}
-          placeholder="From"
-        />
-        <input
-          type="text"
-          id="to"
-          value={to}
-          onChange={(e) => setTo(e.target.value)}
-          placeholder="To"
-        />
-        <button onClick={handleMoveSubmit}>Make Move</button>
-      </div>
       <div>
         <Chessboard
           position={gamefen}
           onPieceDrop={onDrop}
           boardWidth={400}
           id="BasicBoard"
+          boardOrientation={color}
         />
       </div>
     </div>
